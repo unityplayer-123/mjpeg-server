@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Unity Stream</title>
+  <script>
+    function refreshImage() {
+      document.getElementById('stream').src = '/latest.jpg?t=' + new Date().getTime();
+    }
+    setInterval(refreshImage, 33); // 約30fpsで更新
+  </script>
+</head>
+<body style="margin:0; background:black;">
+  <img id="stream" src="/latest.jpg" style="width:100vw; height:100vh; object-fit:contain;" />
+</body>
+</html>
