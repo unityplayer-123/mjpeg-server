@@ -1,28 +1,39 @@
 const express = require('express');
-const multer = require('multer');
 const fs = require('fs');
 const app = express();
-const port = process.env.PORT || 10000;
 
-// メモリに一時保存する multer 設定
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+let latestImageBuffer = null;
 
-// 最新画像のURLで画像を返す（jpg）
-app.use('/latest.jpg', (req, res) => {
-    res.sendFile(__dirname + '/uploads/latest.jpg');
+app.use(express.raw({ type: 'image/jpeg', limit: '10mb' }));
+
+// JPEGを受け取る
+app.post('/upload', (req, res) => {
+    latestImageBuffer = req.body;
+    res.status(200).send('Image received');
 });
 
-// POSTでJPEGを受け取って保存
-app.post('/upload', upload.single('frame'), (req, res) => {
-    if (!req.file) return res.status(400).send('No file');
-    fs.writeFileSync(__dirname + '/uploads/latest.jpg', req.file.buffer);
-    res.send('OK');
+// MJPEG表示用
+app.get('/screen', (req, res) => {
+    res.writeHead(200, {
+        'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+    });
+
+    const interval = setInterval(() => {
+        if (latestImageBuffer) {
+            res.write(`--frame\r\n`);
+            res.write(`Content-Type: image/jpeg\r\n`);
+            res.write(`Content-Length: ${latestImageBuffer.length}\r\n\r\n`);
+            res.write(latestImageBuffer);
+            res.write('\r\n');
+        }
+    }, 100);
+
+    req.on('close', () => clearInterval(interval));
 });
 
-// HTML等の静的ファイル公開
-app.use('/', express.static(__dirname + '/public'));
-
+const port = process.env.PORT || 3000;
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
