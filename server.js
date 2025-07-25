@@ -28,7 +28,7 @@ app.get('/screen', (req, res) => {
             res.write(latestImageBuffer);
             res.write('\r\n');
         }
-    }, 100);
+    }, 33);
 
     req.on('close', () => clearInterval(interval));
 });
