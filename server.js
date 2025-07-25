@@ -20,17 +20,34 @@ app.get('/screen', (req, res) => {
         'Connection': 'keep-alive'
     });
 
-    const interval = setInterval(() => {
+    const targetInterval = 1000 / 30; // 30fps → 約33ms間隔
+    let lastSentTime = Date.now();
+    let isClientConnected = true;
+
+    const sendFrame = () => {
+        if (!isClientConnected) return;
+
+        const now = Date.now();
+        const elapsed = now - lastSentTime;
+
         if (latestImageBuffer) {
             res.write(`--frame\r\n`);
             res.write(`Content-Type: image/jpeg\r\n`);
             res.write(`Content-Length: ${latestImageBuffer.length}\r\n\r\n`);
             res.write(latestImageBuffer);
-            res.write('\r\n');
+            res.write(`\r\n`);
         }
-    }, 33);
 
-    req.on('close', () => clearInterval(interval));
+        lastSentTime = now;
+        const nextDelay = Math.max(0, targetInterval - (Date.now() - now));
+        setTimeout(sendFrame, nextDelay);
+    };
+
+    sendFrame();
+
+    req.on('close', () => {
+        isClientConnected = false;
+    });
 });
 
 const port = process.env.PORT || 3000;
