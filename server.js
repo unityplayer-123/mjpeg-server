@@ -20,15 +20,14 @@ app.get('/screen', (req, res) => {
         'Connection': 'keep-alive'
     });
 
-    const targetInterval = 1000 / 30; // 30fps → 約33ms間隔
-    let lastSentTime = Date.now();
+    const targetInterval = 1000 / 15; // 15fps
     let isClientConnected = true;
+    let timeoutId = null;
 
     const sendFrame = () => {
         if (!isClientConnected) return;
 
         const now = Date.now();
-        const elapsed = now - lastSentTime;
 
         if (latestImageBuffer) {
             res.write(`--frame\r\n`);
@@ -38,15 +37,14 @@ app.get('/screen', (req, res) => {
             res.write(`\r\n`);
         }
 
-        lastSentTime = now;
-        const nextDelay = Math.max(0, targetInterval - (Date.now() - now));
-        setTimeout(sendFrame, nextDelay);
+        timeoutId = setTimeout(sendFrame, targetInterval);
     };
 
     sendFrame();
 
     req.on('close', () => {
         isClientConnected = false;
+        if (timeoutId) clearTimeout(timeoutId);
     });
 });
 
