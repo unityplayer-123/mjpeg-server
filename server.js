@@ -1,18 +1,27 @@
 const express = require('express');
 const fs = require('fs');
+const path = require('path');
+const archiver = require('archiver');
+
 const app = express();
 
 let latestImageBuffer = null;
 
+// 保存ディレクトリ
+const FRAME_DIR = path.join(__dirname, 'frames');
+if (!fs.existsSync(FRAME_DIR)) {
+    fs.mkdirSync(FRAME_DIR);
+}
+
+// JPEG 受信（Unity → Render）
 app.use(express.raw({ type: 'image/jpeg', limit: '10mb' }));
 
-// JPEGを受け取る
 app.post('/upload', (req, res) => {
     latestImageBuffer = req.body;
     res.status(200).send('Image received');
 });
 
-// MJPEG表示用
+// MJPEG 配信
 app.get('/screen', (req, res) => {
     res.writeHead(200, {
         'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
@@ -20,15 +29,9 @@ app.get('/screen', (req, res) => {
         'Connection': 'keep-alive'
     });
 
-    const targetInterval = 1000 / 15; // 15fps
-    let isClientConnected = true;
-    let timeoutId = null;
+    const interval = 1000 / 15;
 
     const sendFrame = () => {
-        if (!isClientConnected) return;
-
-        const now = Date.now();
-
         if (latestImageBuffer) {
             res.write(`--frame\r\n`);
             res.write(`Content-Type: image/jpeg\r\n`);
@@ -36,16 +39,35 @@ app.get('/screen', (req, res) => {
             res.write(latestImageBuffer);
             res.write(`\r\n`);
         }
-
-        timeoutId = setTimeout(sendFrame, targetInterval);
     };
 
-    sendFrame();
+    const timer = setInterval(sendFrame, interval);
 
-    req.on('close', () => {
-        isClientConnected = false;
-        if (timeoutId) clearTimeout(timeoutId);
-    });
+    req.on('close', () => clearInterval(timer));
+});
+
+// HTML から PNG 保存
+app.post('/save-frame', express.raw({ type: 'image/png', limit: '10mb' }), (req, res) => {
+    const frameId = req.query.id;
+    if (!frameId) {
+        res.status(400).send('Missing frame id');
+        return;
+    }
+
+    const filePath = path.join(FRAME_DIR, `frame_${frameId}.png`);
+    fs.writeFileSync(filePath, req.body);
+
+    res.status(200).send('Saved');
+});
+
+// ZIP ダウンロード
+app.get('/download', (req, res) => {
+    res.attachment('frames.zip');
+
+    const archive = archiver('zip');
+    archive.pipe(res);
+    archive.directory(FRAME_DIR, false);
+    archive.finalize();
 });
 
 const port = process.env.PORT || 3000;
