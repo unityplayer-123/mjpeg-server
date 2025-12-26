@@ -1,15 +1,59 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Unity Stream</title>
-  <script>
-    function refreshImage() {
-      document.getElementById('stream').src = '/latest.jpg?t=' + new Date().getTime();
-    }
-    setInterval(refreshImage, 33); // 約30fpsで更新
-  </script>
+<meta charset="UTF-8">
+<title>MJPEG Viewer</title>
 </head>
+
 <body style="margin:0; background:black;">
-  <img id="stream" src="/latest.jpg" style="width:100vw; height:100vh; object-fit:contain;" />
+<img id="stream" src="/screen" style="width:100vw; height:100vh; object-fit:contain;">
+
+<canvas id="canvas" style="display:none;"></canvas>
+
+<script>
+const img = document.getElementById("stream");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+let frameId = 0;
+let saving = false;
+
+// 5秒後に保存開始
+setTimeout(() => {
+    saving = true;
+    console.log("SAVE START");
+
+    // 10秒後に保存終了
+    setTimeout(() => {
+        saving = false;
+        console.log("SAVE END");
+    }, 10000);
+
+}, 5000);
+
+// フレーム取得ループ
+function captureLoop() {
+    if (saving && img.complete) {
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        ctx.drawImage(img, 0, 0);
+
+        canvas.toBlob(blob => {
+            frameId++;
+            const id = frameId.toString().padStart(4, "0");
+
+            fetch(`/save-frame?id=${id}`, {
+                method: "POST",
+                headers: { "Content-Type": "image/png" },
+                body: blob
+            });
+        }, "image/png");
+    }
+
+    requestAnimationFrame(captureLoop);
+}
+
+captureLoop();
+</script>
 </body>
 </html>
