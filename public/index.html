@@ -15,8 +15,9 @@ const img = document.getElementById("stream");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-let frameId = 0;
 let saving = false;
+
+// ===== 保存タイミング制御 =====
 
 // 5秒後に保存開始
 setTimeout(() => {
@@ -31,23 +32,29 @@ setTimeout(() => {
 
 }, 5000);
 
-// フレーム取得ループ
-function captureLoop() {
+// ===== フレーム取得ループ =====
+async function captureLoop() {
     if (saving && img.complete) {
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        ctx.drawImage(img, 0, 0);
 
-        canvas.toBlob(blob => {
-            frameId++;
-            const id = frameId.toString().padStart(4, "0");
+        // ① Server に最新フレームIDを問い合わせ
+        const res = await fetch("/latest-id");
+        const data = await res.json();
+        const frameId = data.frameId;
 
-            fetch(`/save-frame?id=${id}`, {
-                method: "POST",
-                headers: { "Content-Type": "image/png" },
-                body: blob
-            });
-        }, "image/png");
+        if (frameId) {
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            ctx.drawImage(img, 0, 0);
+
+            canvas.toBlob(blob => {
+                // ② Unity と同一IDで保存
+                fetch(`/save-frame?id=${frameId}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "image/png" },
+                    body: blob
+                });
+            }, "image/png");
+        }
     }
 
     requestAnimationFrame(captureLoop);
