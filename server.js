@@ -5,40 +5,38 @@ const archiver = require('archiver');
 
 const app = express();
 
-// ======================================================
-// 設定
-// ======================================================
-const FRAME_DIR = path.join(__dirname, 'frames');
-const SAVE_FPS = 30;
-let frameId = 0;
 let latestImageBuffer = null;
+let latestFrameId = null;
 
-// 保存ディレクトリ作成
+// 保存ディレクトリ
+const FRAME_DIR = path.join(__dirname, 'frames');
 if (!fs.existsSync(FRAME_DIR)) {
     fs.mkdirSync(FRAME_DIR);
 }
 
-// ======================================================
 // JPEG 受信（Unity → Render）
-// ======================================================
+// Unity 側で Header: X-Frame-ID を付ける
 app.use(express.raw({ type: 'image/jpeg', limit: '10mb' }));
 
 app.post('/upload', (req, res) => {
+    const frameId = req.header('X-Frame-ID');
+
+    if (!frameId) {
+        res.status(400).send('Missing X-Frame-ID');
+        return;
+    }
+
+    latestFrameId = frameId;
     latestImageBuffer = req.body;
 
-    // frameId 採番
-    frameId++;
-    const filename = `frame_${String(frameId).padStart(4, '0')}.jpg`;
-    const filepath = path.join(FRAME_DIR, filename);
-
-    fs.writeFileSync(filepath, req.body);
+    // ★② 実際にユーザが見る JPEG を ID 付きで保存
+    const jpegPath = path.join(FRAME_DIR, `mjpeg_${frameId}.jpg`);
+    fs.writeFileSync(jpegPath, req.body);
 
     res.status(200).send('Image received');
 });
 
-// ======================================================
-// MJPEG 配信（ブラウザ表示用）
-// ======================================================
+// MJPEG 配信（ユーザ閲覧用）
 app.get('/screen', (req, res) => {
     res.writeHead(200, {
         'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
@@ -46,9 +44,9 @@ app.get('/screen', (req, res) => {
         'Connection': 'keep-alive'
     });
 
-    const interval = 1000 / SAVE_FPS;
+    const interval = 1000 / 15;
 
-    const timer = setInterval(() => {
+    const sendFrame = () => {
         if (latestImageBuffer) {
             res.write(`--frame\r\n`);
             res.write(`Content-Type: image/jpeg\r\n`);
@@ -56,28 +54,22 @@ app.get('/screen', (req, res) => {
             res.write(latestImageBuffer);
             res.write(`\r\n`);
         }
-    }, interval);
+    };
 
+    const timer = setInterval(sendFrame, interval);
     req.on('close', () => clearInterval(timer));
 });
 
-// ======================================================
 // ZIP ダウンロード
-// ======================================================
 app.get('/download', (req, res) => {
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename=frames.zip');
+    res.attachment('frames.zip');
 
-    const archive = archiver('zip', { zlib: { level: 9 } });
+    const archive = archiver('zip');
     archive.pipe(res);
-
     archive.directory(FRAME_DIR, false);
     archive.finalize();
 });
 
-// ======================================================
-// 起動
-// ======================================================
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
