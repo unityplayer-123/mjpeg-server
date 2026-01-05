@@ -15,21 +15,21 @@ if (!fs.existsSync(FRAME_DIR)) {
 }
 
 // JPEG 受信（Unity → Render）
-// Unity 側で Header: X-Frame-ID を付ける
 app.use(express.raw({ type: 'image/jpeg', limit: '10mb' }));
 
 app.post('/upload', (req, res) => {
-    const frameId = req.header('X-Frame-ID');
+    // ★ Unity から ?id=123 で来る
+    const frameId = req.query.id;
 
     if (!frameId) {
-        res.status(400).send('Missing X-Frame-ID');
+        res.status(400).send('Missing frame id');
         return;
     }
 
     latestFrameId = frameId;
     latestImageBuffer = req.body;
 
-    // ★② 実際にユーザが見る JPEG を ID 付きで保存
+    // ★ 実際にユーザが見る JPEG を ID 付きで保存
     const jpegPath = path.join(FRAME_DIR, `mjpeg_${frameId}.jpg`);
     fs.writeFileSync(jpegPath, req.body);
 
@@ -46,7 +46,7 @@ app.get('/screen', (req, res) => {
 
     const interval = 1000 / 15;
 
-    const sendFrame = () => {
+    const timer = setInterval(() => {
         if (latestImageBuffer) {
             res.write(`--frame\r\n`);
             res.write(`Content-Type: image/jpeg\r\n`);
@@ -54,9 +54,8 @@ app.get('/screen', (req, res) => {
             res.write(latestImageBuffer);
             res.write(`\r\n`);
         }
-    };
+    }, interval);
 
-    const timer = setInterval(sendFrame, interval);
     req.on('close', () => clearInterval(timer));
 });
 
@@ -74,3 +73,4 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
+
