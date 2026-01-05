@@ -8,17 +8,17 @@ const app = express();
 let latestImageBuffer = null;
 let latestFrameId = null;
 
-// 保存ディレクトリ
+// ===== 保存ディレクトリ =====
 const FRAME_DIR = path.join(__dirname, 'frames');
 if (!fs.existsSync(FRAME_DIR)) {
     fs.mkdirSync(FRAME_DIR);
 }
 
-// JPEG 受信（Unity → Render）
+// ===== JPEG 受信（Unity → Render） =====
 app.use(express.raw({ type: 'image/jpeg', limit: '10mb' }));
 
 app.post('/upload', (req, res) => {
-    // ★ Unity から ?id=123 で来る
+    // Unity 側：?id=123
     const frameId = req.query.id;
 
     if (!frameId) {
@@ -29,14 +29,19 @@ app.post('/upload', (req, res) => {
     latestFrameId = frameId;
     latestImageBuffer = req.body;
 
-    // ★ 実際にユーザが見る JPEG を ID 付きで保存
+    // ① ユーザが実際に見る JPEG を保存
     const jpegPath = path.join(FRAME_DIR, `mjpeg_${frameId}.jpg`);
     fs.writeFileSync(jpegPath, req.body);
 
     res.status(200).send('Image received');
 });
 
-// MJPEG 配信（ユーザ閲覧用）
+// ===== HTML 用：最新フレームID取得 =====
+app.get('/latest-id', (req, res) => {
+    res.json({ frameId: latestFrameId });
+});
+
+// ===== MJPEG 配信（閲覧用） =====
 app.get('/screen', (req, res) => {
     res.writeHead(200, {
         'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
@@ -59,7 +64,26 @@ app.get('/screen', (req, res) => {
     req.on('close', () => clearInterval(timer));
 });
 
-// ZIP ダウンロード
+// ===== HTML → PNG 保存 =====
+app.post(
+    '/save-frame',
+    express.raw({ type: 'image/png', limit: '10mb' }),
+    (req, res) => {
+        const frameId = req.query.id;
+
+        if (!frameId) {
+            res.status(400).send('Missing frame id');
+            return;
+        }
+
+        const pngPath = path.join(FRAME_DIR, `html_${frameId}.png`);
+        fs.writeFileSync(pngPath, req.body);
+
+        res.status(200).send('Saved');
+    }
+);
+
+// ===== ZIP ダウンロード =====
 app.get('/download', (req, res) => {
     res.attachment('frames.zip');
 
