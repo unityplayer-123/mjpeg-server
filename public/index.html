@@ -15,49 +15,68 @@ const img = document.getElementById("stream");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-let saving = false;
+// ====== 1) 映像配信は常時継続（保存とは無関係） ======
+// /screen が「最新1枚画像」方式でも更新されるように、一定周期で src を更新する
+const STREAM_FPS = 30; // 表示更新目安（必要に応じて下げてOK）
+const STREAM_INTERVAL_MS = Math.max(10, Math.floor(1000 / STREAM_FPS));
 
-// ===== 保存タイミング制御 =====
+function startStreamRefresh() {
+  setInterval(() => {
+    // cache busting: これでブラウザキャッシュを回避して常に最新を取りにいく
+    img.src = `/screen?t=${Date.now()}`;
+  }, STREAM_INTERVAL_MS);
+}
+startStreamRefresh();
+
+// ====== 2) 保存タイミング制御 ======
+let saving = false;
 
 // 5秒後に保存開始
 setTimeout(() => {
-    saving = true;
-    console.log("SAVE START");
+  saving = true;
+  console.log("SAVE START");
 
-    // 10秒後に保存終了
-    setTimeout(() => {
-        saving = false;
-        console.log("SAVE END");
-    }, 10000);
+  // 10秒後に保存終了（映像配信は止めない）
+  setTimeout(() => {
+    saving = false;
+    console.log("SAVE END (stream continues)");
+  }, 10000);
 
 }, 5000);
 
-// ===== フレーム取得ループ =====
+// ====== 3) フレーム保存ループ（保存中だけ動く） ======
 async function captureLoop() {
-    if (saving && img.complete) {
+  try {
+    if (saving && img.complete && img.naturalWidth > 0) {
 
-        // ① Server に最新フレームIDを問い合わせ
-        const res = await fetch("/latest-id");
-        const data = await res.json();
-        const frameId = data.frameId;
+      // ① Server に最新フレームIDを問い合わせ
+      const res = await fetch("/latest-id", { cache: "no-store" });
+      const data = await res.json();
+      const frameId = data.frameId;
 
-        if (frameId) {
-            canvas.width = img.naturalWidth;
-            canvas.height = img.naturalHeight;
-            ctx.drawImage(img, 0, 0);
+      if (frameId) {
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        ctx.drawImage(img, 0, 0);
 
-            canvas.toBlob(blob => {
-                // ② Unity と同一IDで保存
-                fetch(`/save-frame?id=${frameId}`, {
-                    method: "POST",
-                    headers: { "Content-Type": "image/png" },
-                    body: blob
-                });
-            }, "image/png");
-        }
+        canvas.toBlob(blob => {
+          if (!blob) return;
+
+          // ② Unity と同一IDで保存
+          fetch(`/save-frame?id=${frameId}`, {
+            method: "POST",
+            headers: { "Content-Type": "image/png" },
+            body: blob
+          });
+        }, "image/png");
+      }
     }
+  } catch (e) {
+    // 保存中に一時的に失敗しても映像表示は止めない
+    console.warn("captureLoop error:", e);
+  }
 
-    requestAnimationFrame(captureLoop);
+  requestAnimationFrame(captureLoop);
 }
 
 captureLoop();
