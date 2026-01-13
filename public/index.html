@@ -6,7 +6,7 @@
 </head>
 
 <body style="margin:0; background:black;">
-<img id="stream" src="/screen" style="width:100vw; height:100vh; object-fit:contain;">
+<img id="stream" style="width:100vw; height:100vh; object-fit:contain;">
 
 <canvas id="canvas" style="display:none;"></canvas>
 
@@ -15,20 +15,27 @@ const img = document.getElementById("stream");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-// ====== 1) 映像配信は常時継続（保存とは無関係） ======
-// /screen が「最新1枚画像」方式でも更新されるように、一定周期で src を更新する
-const STREAM_FPS = 30; // 表示更新目安（必要に応じて下げてOK）
-const STREAM_INTERVAL_MS = Math.max(10, Math.floor(1000 / STREAM_FPS));
-
-function startStreamRefresh() {
-  setInterval(() => {
-    // cache busting: これでブラウザキャッシュを回避して常に最新を取りにいく
-    img.src = `/screen?t=${Date.now()}`;
-  }, STREAM_INTERVAL_MS);
+// ====== 1) MJPEGは「貼りっぱなし」 ======
+function connectStream() {
+  // cache busting しつつ接続（1回だけ）
+  img.src = `/screen?t=${Date.now()}`;
+  console.log("MJPEG CONNECT");
 }
-startStreamRefresh();
+connectStream();
 
-// ====== 2) 保存タイミング制御 ======
+// エラー時は再接続
+img.addEventListener("error", () => {
+  console.warn("MJPEG error -> reconnect");
+  setTimeout(connectStream, 1000);
+});
+
+// 保険：一定時間ごとに張り直し（プロキシ切断対策）
+setInterval(() => {
+  console.log("MJPEG refresh reconnect");
+  connectStream();
+}, 30000);
+
+// ====== 2) 保存タイミング制御（任意） ======
 let saving = false;
 
 // 5秒後に保存開始
@@ -44,12 +51,10 @@ setTimeout(() => {
 
 }, 5000);
 
-// ====== 3) フレーム保存ループ（保存中だけ動く） ======
+// ====== 3) PNG保存ループ（保存中だけ） ======
 async function captureLoop() {
   try {
     if (saving && img.complete && img.naturalWidth > 0) {
-
-      // ① Server に最新フレームIDを問い合わせ
       const res = await fetch("/latest-id", { cache: "no-store" });
       const data = await res.json();
       const frameId = data.frameId;
@@ -61,8 +66,6 @@ async function captureLoop() {
 
         canvas.toBlob(blob => {
           if (!blob) return;
-
-          // ② Unity と同一IDで保存
           fetch(`/save-frame?id=${frameId}`, {
             method: "POST",
             headers: { "Content-Type": "image/png" },
@@ -72,13 +75,11 @@ async function captureLoop() {
       }
     }
   } catch (e) {
-    // 保存中に一時的に失敗しても映像表示は止めない
     console.warn("captureLoop error:", e);
   }
 
   requestAnimationFrame(captureLoop);
 }
-
 captureLoop();
 </script>
 </body>
