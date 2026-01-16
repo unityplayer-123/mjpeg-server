@@ -11,12 +11,13 @@ let latestFrameId = null;
 const FRAME_DIR = path.join(__dirname, 'frames');
 if (!fs.existsSync(FRAME_DIR)) fs.mkdirSync(FRAME_DIR);
 
-// 保存をしたいときだけ true にする（普段は false 推奨）
-const SAVE_JPEG = process.env.SAVE_JPEG === '0'; // Renderの環境変数で制御できる
+// ✅ "1" のときだけ保存する（バグ修正）
+const SAVE_JPEG = process.env.SAVE_JPEG === '1';
 
-app.get('/', (req, res) => res.status(200).send('OK'));
+// ✅ public 配信（index.html を確実に出す）
+app.use(express.static(path.join(__dirname, 'public')));
+
 app.get('/health', (req, res) => res.status(200).send('healthy'));
-
 app.get('/count', (req, res) => {
   try {
     const files = fs.readdirSync(FRAME_DIR);
@@ -35,19 +36,14 @@ app.use(express.raw({ type: 'image/jpeg', limit: '10mb' }));
 
 app.post('/upload', async (req, res) => {
   const frameId = req.query.id;
-  if (!frameId) {
-    res.status(400).send('Missing frame id. Use /upload?id=123');
-    return;
-  }
+  if (!frameId) return res.status(400).send('Missing frame id. Use /upload?id=123');
 
   latestFrameId = String(frameId);
-  // 念のため Buffer 化（express.raw は Buffer だけど保険）
   latestImageBuffer = Buffer.from(req.body);
 
   // 返事は先に返す（配信優先）
   res.status(200).send('Image received');
 
-  // JPG保存は「必要なときだけ」＆「非同期」
   if (SAVE_JPEG) {
     const jpegPath = path.join(FRAME_DIR, `mjpeg_${String(frameId).padStart(6, '0')}.jpg`);
     try {
@@ -56,39 +52,66 @@ app.post('/upload', async (req, res) => {
       console.error('Failed to write JPEG:', e);
     }
   }
-
-  // デバッグログ（多すぎるなら間引き推奨）
-  // console.log('UPLOAD OK', frameId, 'bytes=', latestImageBuffer.length);
 });
 
-// MJPEG配信
+// ✅ 比較用：単発JPEG（ポーリング型の比較がしやすい）
+app.get('/latest.jpg', (req, res) => {
+  if (!latestImageBuffer) return res.status(404).send('No frame yet');
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.end(latestImageBuffer);
+});
+
+// ✅ 公開MJPEG配信（multipart）
 app.get('/screen', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
     'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
     'Pragma': 'no-cache',
     'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
   });
 
-  // これを入れるとプロキシ環境で安定することがある
   res.flushHeaders?.();
 
-  const interval = 1000 / 15;
+  const fps = Math.min(30, Math.max(1, Number(req.query.fps ?? 15) || 15));
+  const interval = Math.round(1000 / fps);
+
+  let closed = false;
+  req.on('close', () => { closed = true; });
+
+  let waitingDrain = false;
 
   const timer = setInterval(() => {
+    if (closed) {
+      clearInterval(timer);
+      return;
+    }
     if (!latestImageBuffer) return;
+    if (waitingDrain) return;
 
-    res.write(`--frame\r\n`);
-    res.write(`Content-Type: image/jpeg\r\n`);
-    res.write(`Content-Length: ${latestImageBuffer.length}\r\n\r\n`);
-    res.write(latestImageBuffer);
-    res.write(`\r\n`);
+    const header =
+      `--frame\r\n` +
+      `Content-Type: image/jpeg\r\n` +
+      `Content-Length: ${latestImageBuffer.length}\r\n` +
+      `X-Frame-Id: ${latestFrameId ?? ''}\r\n` +
+      `\r\n`;
+
+    // backpressure 対応（詰まったら drain を待つ）
+    const ok1 = res.write(header);
+    const ok2 = res.write(latestImageBuffer);
+    const ok3 = res.write('\r\n');
+
+    if (!(ok1 && ok2 && ok3)) {
+      waitingDrain = true;
+      res.once('drain', () => {
+        waitingDrain = false;
+      });
+    }
   }, interval);
-
-  req.on('close', () => clearInterval(timer));
 });
 
-// PNG保存（これは保存中だけ呼ばれる前提なのでOK。ただし負荷が高ければ async化推奨）
+// PNG保存
 app.post('/save-frame', express.raw({ type: 'image/png', limit: '10mb' }), async (req, res) => {
   const frameId = req.query.id;
   if (!frameId) return res.status(400).send('Missing frame id');
